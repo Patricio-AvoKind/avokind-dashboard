@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>AvoKind Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=STIX+Two+Text:wght@600&display=swap" rel="stylesheet">
+<style>
+  :root{--avo:#12281A;--leaf:#159600;--cream:#FBF9F0;--line:#E7E3D6;--ink:#171817;--ink-2:#4A4F4A;--muted:#7A7F78;--bad:#B42318}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--avo);color:var(--ink);font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+  body{display:flex;align-items:center;justify-content:center;padding:16px}
+  .box{width:100%;max-width:380px;background:var(--cream);border-radius:16px;padding:32px 28px;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+  .logo{font-family:"STIX Two Text",Georgia,serif;font-size:34px;font-weight:600;color:var(--avo);margin:0}
+  .tag{color:var(--muted);font-size:13px;margin:4px 0 24px}
+  label{display:block;font-size:13px;font-weight:500;color:var(--ink-2);margin-bottom:6px}
+  input[type=password]{width:100%;font:inherit;font-size:15px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink)}
+  input[type=password]:focus{outline:2px solid var(--leaf);outline-offset:1px;border-color:transparent}
+  .remember{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-2);margin:14px 0 18px}
+  button{width:100%;font:inherit;font-size:15px;font-weight:600;padding:11px;border:0;border-radius:10px;background:var(--avo);color:var(--cream);cursor:pointer}
+  button:hover{background:#1C3826} button:disabled{opacity:.6;cursor:wait}
+  .err{color:var(--bad);font-size:13px;min-height:18px;margin-top:12px}
+  .note{color:var(--muted);font-size:11px;margin-top:18px;line-height:1.5}
+</style>
+</head>
+<body>
+<form class="box" id="f" autocomplete="on">
+  <p class="logo">AvoKind</p>
+  <p class="tag">Growth dashboard · acceso privado</p>
+  <label for="pw">Contraseña</label>
+  <input type="password" id="pw" name="password" autocomplete="current-password" required autofocus>
+  <label class="remember"><input type="checkbox" id="rem"> Recordarme en este dispositivo</label>
+  <button id="go" type="submit">Entrar</button>
+  <div class="err" id="err" role="alert"></div>
+  <p class="note">Los datos están cifrados (AES-256). Se descifran solo en tu navegador con la contraseña; nada se envía a ningún servidor.</p>
+</form>
+
+<script type="application/json" id="payload">__PAYLOAD__</script>
+<script>
+(() => {
+  const P = JSON.parse(document.getElementById('payload').textContent);
+  const KEY = 'avokind-dash-key';
+  const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  const enc = new TextEncoder(), dec = new TextDecoder();
+
+  async function deriveRaw(password){
+    const base = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
+    return new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2', hash:'SHA-256', salt:b64(P.salt), iterations:P.iter}, base, 256));
+  }
+  async function decrypt(raw){
+    const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
+    return dec.decode(await crypto.subtle.decrypt({name:'AES-GCM', iv:b64(P.iv)}, key, b64(P.ct)));
+  }
+  function render(html){
+    // small "Salir" button so a remembered device can sign out
+    const out = '<button onclick="try{localStorage.removeItem(\'' + KEY + '\')}catch(e){};location.reload()" ' +
+      'style="position:fixed;right:12px;bottom:12px;z-index:99;width:auto;font:500 12px Inter,system-ui,sans-serif;padding:6px 10px;border-radius:8px;' +
+      'border:1px solid #E7E3D6;background:#fff;color:#4A4F4A;cursor:pointer">Salir</button>';
+    const swap = () => { document.open(); document.write(html.replace(/<\/body>/i, out + '</body>')); document.close(); };
+    // replacing the document while it is still loading merges the two pages, so wait for load
+    if (document.readyState === 'complete') swap(); else addEventListener('load', swap, { once: true });
+  }
+  const toB64 = u => btoa(String.fromCharCode(...u));
+
+  // remembered device: key is stored per salt, so a new password asks again
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (saved && saved.salt === P.salt) { decrypt(b64(saved.k)).then(render, () => localStorage.removeItem(KEY)); }
+  } catch (e) {}
+
+  document.getElementById('f').addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = document.getElementById('go'), err = document.getElementById('err');
+    btn.disabled = true; btn.textContent = 'Abriendo…'; err.textContent = '';
+    try {
+      const raw = await deriveRaw(document.getElementById('pw').value);
+      const html = await decrypt(raw);            // throws on a wrong password
+      if (document.getElementById('rem').checked) {
+        try { localStorage.setItem(KEY, JSON.stringify({salt:P.salt, k:toB64(raw)})); } catch (e) {}
+      }
+      render(html);
+    } catch (x) {
+      err.textContent = 'Contraseña incorrecta.';
+      btn.disabled = false; btn.textContent = 'Entrar';
+    }
+  });
+})();
+</script>
+</body>
+</html>

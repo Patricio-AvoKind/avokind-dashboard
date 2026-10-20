@@ -1,0 +1,8 @@
+# Only the encrypted build and the tooling are published. Never commit plaintext dashboards or data.
+*
+!.gitignore
+!index.html
+!login.html
+!encrypt.mjs
+!crypto.json
+!README.md
